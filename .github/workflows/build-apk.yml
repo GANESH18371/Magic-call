@@ -1,0 +1,67 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare Keystore & Environment
+        run: |
+          # Prepare .env from .env.example if .env does not exist
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+
+          # Decode debug.keystore from base64 if present
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
+          # Ensure gradlew has execute permission
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Organize Output APK
+        run: |
+          mkdir -p apk_output
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk apk_output/MagicVoiceAI-debug.apk
+            echo "APK generated successfully: apk_output/MagicVoiceAI-debug.apk"
+          else
+            echo "Error: APK not found in default output directory"
+            find app/build/outputs/apk -name "*.apk" -exec cp {} apk_output/MagicVoiceAI-debug.apk \;
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MagicVoiceAI-debug-apk
+          path: apk_output/MagicVoiceAI-debug.apk
+          retention-days: 30
