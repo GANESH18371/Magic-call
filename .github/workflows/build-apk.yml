@@ -20,42 +20,64 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
           cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Accept Android SDK Licenses
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses" || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
       - name: Prepare Keystore & Environment
         run: |
-          # Prepare .env from .env.example if .env does not exist
+          # Ensure .env exists from template
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
+          elif [ ! -f .env ]; then
+            touch .env
           fi
 
-          # Decode debug.keystore from base64 if present
-          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+          # Ensure debug.keystore exists (decode from base64 or generate fallback)
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              base64 -d debug.keystore.base64 > debug.keystore || true
+            fi
           fi
 
-          # Ensure gradlew has execute permission
+          # Generate fresh debug keystore if still missing
+          if [ ! -f debug.keystore ] || [ ! -s debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -alias androiddebugkey \
+              -keypass android \
+              -storepass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          # Grant execution permission to gradlew
           chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --no-configuration-cache --stacktrace -Pandroid.builder.sdkDownload=true
 
       - name: Organize Output APK
         run: |
           mkdir -p apk_output
           if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
             cp app/build/outputs/apk/debug/app-debug.apk apk_output/MagicVoiceAI-debug.apk
-            echo "APK generated successfully: apk_output/MagicVoiceAI-debug.apk"
+            echo "APK ready at apk_output/MagicVoiceAI-debug.apk"
           else
-            echo "Error: APK not found in default output directory"
+            echo "Searching for generated APKs..."
             find app/build/outputs/apk -name "*.apk" -exec cp {} apk_output/MagicVoiceAI-debug.apk \;
           fi
 
